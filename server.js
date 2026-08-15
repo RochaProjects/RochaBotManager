@@ -16,15 +16,19 @@ try {
   for (const ver of ['1.21', '1.21.1', '1.21.4']) {
     try {
       const d = mcData(ver);
-      const types = d?.protocol?.play?.toClient?.types;
-      if (types && !types.packet_common_transfer) {
-        types.packet_common_transfer = [
-          'container',
-          [
-            { name: 'host', type: 'string' },
-            { name: 'port', type: 'varint' },
-          ],
-        ];
+      // O Transfer Packet do Velocity está no estado 'configuration' (0x0b em 1.21.1)
+      // não no 'play' como assumido antes. Patch nos dois por segurança.
+      for (const state of ['play', 'configuration']) {
+        const types = d?.protocol?.[state]?.toClient?.types;
+        if (types && !types.packet_common_transfer) {
+          types.packet_common_transfer = [
+            'container',
+            [
+              { name: 'host', type: 'string' },
+              { name: 'port', type: 'varint' },
+            ],
+          ];
+        }
       }
     } catch (_) {}
   }
@@ -170,39 +174,40 @@ async function connectBot(id) {
   // Guarda referência para poder checar depois
   rt._setIntentional = () => { intentionalDisconnect = true; };
 
-  // ── Velocity Transfer Packet ────────────────────────────────────────────────
-  // Agora que o pacote está registrado via customPackets, o minecraft-protocol
-  // consegue decodificá-lo e emite o evento 'transfer' com { host, port }.
-  // Capturamos aqui e reconectamos o bot diretamente no novo backend.
-  try {
-    const rawClient = bot._client;
-    if (rawClient) {
-      rawClient.on('transfer', (packet) => {
-        if (intentionalDisconnect) return;
-        const newHost = packet.host || cfg.host;
-        const newPort = packet.port || cfg.port;
-        pushLog(id, `Transfer Velocity: indo para ${newHost}:${newPort}...`);
-        // Fecha conexão atual de forma limpa; o end event reconecta
-        try { rawClient.end('transfer'); } catch (_) {}
-      });
+  // ── Velocity server switch (start_configuration) ─────────────────────────
+  // O Velocity troca o bot de servidor via start_configuration → ciclo de
+  // configuration → play. O minecraft-protocol já trata isso internamente
+  // em play.js (client.on('start_configuration', () => enterConfigState())).
+  // Não precisamos fazer nada aqui — apenas logamos para debug.
+  const rawClient = bot._client;
+  if (rawClient) {
+    rawClient.on('start_configuration', () => {
+      if (intentionalDisconnect) return;
+      pushLog(id, 'Velocity: trocando de servidor, aguardando reconexão...');
+      rt.status = 'connecting';
+    });
 
-      // Fallback para versões onde o ID do pacote pode ser diferente:
-      // captura erros de parse e reconecta antes que o Velocity dê timeout
-      rawClient.on('error', (err) => {
-        if (intentionalDisconnect) return;
-        const msg = String(err && err.message || '').toLowerCase();
-        if (msg.includes('parse error') || msg.includes('packet') || msg.includes('decode')) {
-          pushLog(id, `Erro de decode (Transfer?): ${err.message} — reconectando...`);
-          try { rawClient.end('transfer'); } catch (_) {}
-        }
-      });
-    }
-  } catch (_) {}
-  // ───────────────────────────────────────────────────────────────────────────
+    rawClient.on('login', () => {
+      if (intentionalDisconnect) return;
+      if (rt.status === 'connecting') {
+        rt.status = 'online';
+        pushLog(id, 'Reconectado no novo servidor via Velocity.');
+      }
+    });
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   bot.on('login', () => {
     rt.status = 'online';
     pushLog(id, `Online no servidor. (v${version})`);
+  });
+
+  // spawn é emitido pelo mineflayer toda vez que entra num mundo — inclui após troca de servidor via Velocity
+  bot.on('spawn', () => {
+    if (rt.status === 'connecting') {
+      rt.status = 'online';
+      pushLog(id, 'Reconectado no novo servidor via Velocity.');
+    }
   });
 
   bot.on('chat', (username, message) => {
