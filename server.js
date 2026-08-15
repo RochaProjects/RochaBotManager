@@ -118,6 +118,25 @@ async function connectBot(id) {
     }
   }
 
+  // Patcha o minecraft-data para definir packet_common_transfer antes de criar o bot.
+  // O transfer packet (Velocity/MC 1.20.5+) já aparece no mapeamento de IDs do
+  // minecraft-data, mas sem definição de tipo — isso faz o protocolo lançar
+  // "A packet did not decode successfully" ao receber o pacote.
+  // Estrutura: host (string) + port (varint)
+  try {
+    const mcData = require(path.join(__dirname, 'node_modules', 'minecraft-data'))(version);
+    const toClientTypes = mcData.protocol?.play?.toClient?.types;
+    if (toClientTypes && !toClientTypes.packet_common_transfer) {
+      toClientTypes.packet_common_transfer = [
+        'container',
+        [
+          { name: 'host', type: 'string' },
+          { name: 'port', type: 'varint' },
+        ],
+      ];
+    }
+  } catch (_) {}
+
   let bot;
   try {
     bot = mineflayer.createBot({
@@ -142,6 +161,36 @@ async function connectBot(id) {
 
   // Guarda referência para poder checar depois
   rt._setIntentional = () => { intentionalDisconnect = true; };
+
+  // ── Velocity Transfer Packet ────────────────────────────────────────────────
+  // Agora que o pacote está registrado via customPackets, o minecraft-protocol
+  // consegue decodificá-lo e emite o evento 'transfer' com { host, port }.
+  // Capturamos aqui e reconectamos o bot diretamente no novo backend.
+  try {
+    const rawClient = bot._client;
+    if (rawClient) {
+      rawClient.on('transfer', (packet) => {
+        if (intentionalDisconnect) return;
+        const newHost = packet.host || cfg.host;
+        const newPort = packet.port || cfg.port;
+        pushLog(id, `Transfer Velocity: indo para ${newHost}:${newPort}...`);
+        // Fecha conexão atual de forma limpa; o end event reconecta
+        try { rawClient.end('transfer'); } catch (_) {}
+      });
+
+      // Fallback para versões onde o ID do pacote pode ser diferente:
+      // captura erros de parse e reconecta antes que o Velocity dê timeout
+      rawClient.on('error', (err) => {
+        if (intentionalDisconnect) return;
+        const msg = String(err && err.message || '').toLowerCase();
+        if (msg.includes('parse error') || msg.includes('packet') || msg.includes('decode')) {
+          pushLog(id, `Erro de decode (Transfer?): ${err.message} — reconectando...`);
+          try { rawClient.end('transfer'); } catch (_) {}
+        }
+      });
+    }
+  } catch (_) {}
+  // ───────────────────────────────────────────────────────────────────────────
 
   bot.on('login', () => {
     rt.status = 'online';
@@ -182,7 +231,10 @@ async function connectBot(id) {
   });
 
   bot.on('error', (err) => {
-    if (intentionalDisconnect || rt.status === 'offline') return;
+    if (intentionalDisconnect || rt.status === 'offline' || rt.status === 'connecting') return;
+    const msg = String(err && err.message || '').toLowerCase();
+    // Erros de decode de pacote são tratados pelo handler do rawClient — ignorar aqui
+    if (msg.includes('packet') || msg.includes('decode') || msg.includes('invalid data')) return;
     rt.status = 'error';
     rt.client = null;
     pushLog(id, `Erro: ${err.message}`);
@@ -194,7 +246,7 @@ async function connectBot(id) {
     const lower = String(reason || '').toLowerCase();
 
     // Velocity transfer: reconecta automaticamente após breve delay
-    const isTransfer = lower.includes('transfer') || lower.includes('SwitchProxyCommand') ||
+    const isTransfer = lower.includes('transfer') || lower.includes('switchproxycommand') ||
                        lower === '' || lower === 'socketclosed' || lower === 'end';
 
     if (isTransfer && rt.status !== 'offline') {
