@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rocha Bot Manager</title>
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #0d0d14;
+      --panel: #13131f;
+      --panel2: #1a1a2a;
+      --line: rgba(255, 255, 255, 0.08);
+      --purple: #8b5cf6;
+      --purple2: #a78bfa;
+      --green: #22c55e;
+      --red: #ef4444;
+      --yellow: #f59e0b;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --radius: 10px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ── Layout ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    header h1 {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--purple2);
+      letter-spacing: 0.02em;
+    }
+
+    header span {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      height: calc(100vh - 49px);
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      border-right: 1px solid var(--line);
+      overflow: hidden;
+    }
+
+    .sidebar-top {
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .bot-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .bot-card {
+      display: grid;
+      grid-template-columns: 8px 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel2);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      user-select: none;
+    }
+
+    .bot-card:hover {
+      border-color: rgba(139, 92, 246, 0.4);
+    }
+
+    .bot-card.active {
+      border-color: var(--purple);
+      background: rgba(139, 92, 246, 0.08);
+    }
+
+    .bot-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .bot-dot.online {
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+    }
+
+    .bot-dot.connecting {
+      background: var(--yellow);
+    }
+
+    .bot-dot.error {
+      background: var(--red);
+    }
+
+    .bot-info {
+      min-width: 0;
+    }
+
+    .bot-info strong {
+      display: block;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .bot-info small {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: block;
+    }
+
+    .bot-status-badge {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 999px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .badge-online {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--green);
+    }
+
+    .badge-offline {
+      background: rgba(100, 116, 139, 0.15);
+      color: var(--muted);
+    }
+
+    .badge-connecting {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--yellow);
+    }
+
+    .badge-error {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--red);
+    }
+
+    .empty-list {
+      text-align: center;
+      padding: 32px 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* ── Detail panel ── */
+    .detail {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .detail-empty {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .detail-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      flex-wrap: wrap;
+    }
+
+    .detail-header-left {
+      min-width: 0;
+    }
+
+    .detail-header-left h2 {
+      font-size: 15px;
+      font-weight: 800;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .detail-header-left small {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .detail-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .detail-body {
+      flex: 1;
+      display: grid;
+      grid-template-rows: 1fr auto auto;
+      overflow: hidden;
+      padding: 14px;
+      gap: 10px;
+    }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .tab-btn {
+      padding: 8px 14px;
+      border: none;
+      background: none;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .tab-btn.active {
+      color: var(--purple2);
+      border-bottom-color: var(--purple);
+    }
+
+    .tab-panel {
+      display: none;
+      flex: 1;
+      overflow: hidden;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .tab-panel.active {
+      display: flex;
+    }
+
+    /* ── Log / Chat ── */
+    .log-box {
+      flex: 1;
+      overflow-y: auto;
+      background: #0a0a12;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #94a3b8;
+    }
+
+    .log-box .log-line {
+      display: block;
+    }
+
+    .log-box .log-time {
+      color: #334155;
+      margin-right: 6px;
+    }
+
+    .log-box .chat-out {
+      color: #a78bfa;
+    }
+
+    .log-box .chat-in {
+      color: #86efac;
+    }
+
+    .log-box .chat-sys {
+      color: #64748b;
+      font-style: italic;
+    }
+
+    .chat-form {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+
+    /* ── Config form ── */
+    .config-form {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      overflow-y: auto;
+    }
+
+    .config-form .full {
+      grid-column: 1 / -1;
+    }
+
+    .config-form label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .config-form input[type="text"],
+    .config-form input[type="number"] {
+      background: #0a0a12;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 7px 10px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .config-form input:focus {
+      border-color: var(--purple);
+    }
+
+    .config-form .check-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    /* ── Novo bot form ── */
+    .new-bot-form {
+      display: grid;
+      gap: 8px;
+    }
+
+    .new-bot-form .row {
+      display: grid;
+      grid-template-columns: 1fr 100px;
+      gap: 8px;
+    }
+
+    .new-bot-form .row3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+
+    /* ── Botões ── */
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 34px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel2);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+
+    button:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--purple);
+      color: #fff;
+      border-color: var(--purple);
+    }
+
+    .btn-primary:hover {
+      background: var(--purple2);
+      border-color: var(--purple2);
+    }
+
+    .btn-green {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--green);
+      border-color: rgba(34, 197, 94, 0.3);
+    }
+
+    .btn-green:hover {
+      background: rgba(34, 197, 94, 0.25);
+    }
+
+    .btn-red {
+      background: rgba(239, 68, 68, 0.12);
+      color: var(--red);
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    .btn-red:hover {
+      background: rgba(239, 68, 68, 0.22);
+    }
+
+    .btn-sm {
+      min-height: 28px;
+      padding: 0 10px;
+      font-size: 12px;
+      border-radius: 6px;
+    }
+
+    input[type="text"],
+    input[type="number"] {
+      background: var(--panel2);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 13px;
+      min-height: 34px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input:focus {
+      border-color: var(--purple);
+    }
+
+    /* ── Collapsible new bot ── */
+    .new-bot-section {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .new-bot-toggle {
+      width: 100%;
+      border: none;
+      border-radius: 0;
+      background: var(--panel2);
+      justify-content: space-between;
+      padding: 10px 14px;
+      font-size: 13px;
+    }
+
+    .new-bot-toggle .arrow {
+      transition: transform 0.2s;
+      font-size: 10px;
+    }
+
+    .new-bot-toggle.open .arrow {
+      transform: rotate(180deg);
+    }
+
+    .new-bot-body {
+      display: none;
+      padding: 12px 14px;
+      border-top: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .new-bot-body.open {
+      display: block;
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar {
+      width: 5px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+
+    @media (max-width: 700px) {
+      main {
+        grid-template-columns: 1fr;
+        grid-template-rows: 260px 1fr;
+      }
+
+      .sidebar {
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <h1>⛏ Rocha Bot Manager</h1>
+    <span id="header-status">carregando...</span>
+  </header>
+
+  <main>
+    <!-- ── Sidebar ── -->
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <div class="new-bot-section">
+          <button class="new-bot-toggle" id="new-bot-toggle">
+          <span>+ Novo Bot</span>
+          <span class="arrow">▼</span>
+        </button>
+          <div class="new-bot-body" id="new-bot-body">
+            <div class="new-bot-form">
+              <div class="row">
+                <input type="text" id="new-host" placeholder="Host (ex: mc.exemplo.com)" />
+                <input type="number" id="new-port" placeholder="Porta" value="25565" min="1" max="65535" />
+              </div>
+              <div class="row">
+                <input type="text" id="new-nick" placeholder="Nick (padrão: RochaBot)" maxlength="16" />
+                <input type="text" id="new-version" placeholder="Versão (auto)" />
+              </div>
+              <input type="text" id="new-label" placeholder="Nome exibido (opcional)" class="full" />
+              <div style="display:flex; align-items:center; gap:10px; justify-content:space-between;">
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+                <input type="checkbox" id="new-autoconnect" />
+                Auto-conectar
+              </label>
+                <button class="btn-primary btn-sm" id="btn-create">Criar Bot</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bot-list" id="bot-list">
+        <div class="empty-list">Nenhum bot criado ainda.</div>
+      </div>
+    </aside>
+
+    <!-- ── Detail ── -->
+    <section class="detail" id="detail">
+      <div class="detail-empty" id="detail-empty">Selecione um bot para gerenciar.</div>
+
+      <div id="detail-content" style="display:none; flex:1; display:none; flex-direction:column; overflow:hidden;">
+        <div class="detail-header">
+          <div class="detail-header-left">
+            <h2 id="detail-title">—</h2>
+            <small id="detail-subtitle">—</small>
+          </div>
+          <div class="detail-actions">
+            <button class="btn-green" id="btn-connect">▶ Conectar</button>
+            <button class="btn-red"   id="btn-disconnect">■ Desconectar</button>
+            <button class="btn-red btn-sm" id="btn-delete">🗑 Remover</button>
+          </div>
+        </div>
+
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="chat">Chat</button>
+          <button class="tab-btn"        data-tab="log">Log</button>
+          <button class="tab-btn"        data-tab="config">Config</button>
+        </div>
+
+        <div class="detail-body">
+          <!-- Chat tab -->
+          <div class="tab-panel active" id="tab-chat" style="display:flex;">
+            <div class="log-box" id="chat-box"></div>
+            <div class="chat-form">
+              <input type="text" id="chat-input" placeholder="Mensagem para enviar no jogo..." maxlength="256" />
+              <button class="btn-primary" id="btn-send">Enviar</button>
+            </div>
+          </div>
+
+          <!-- Log tab -->
+          <div class="tab-panel" id="tab-log">
+            <div class="log-box" id="log-box"></div>
+            <button class="btn-sm" id="btn-clear-log" style="align-self:flex-start;">Limpar</button>
+          </div>
+
+          <!-- Config tab -->
+          <div class="tab-panel" id="tab-config">
+            <div class="config-form">
+              <label class="full">
+              Nome exibido
+              <input type="text" id="cfg-label" />
+            </label>
+              <label>
+              Nick no jogo
+              <input type="text" id="cfg-nick" maxlength="16" />
+            </label>
+              <label>
+              Versão
+              <input type="text" id="cfg-version" placeholder="auto" />
+            </label>
+              <label>
+              Host
+              <input type="text" id="cfg-host" />
+            </label>
+              <label>
+              Porta
+              <input type="number" id="cfg-port" min="1" max="65535" />
+            </label>
+              <label class="full check-row">
+              <input type="checkbox" id="cfg-autoconnect" />
+              Auto-conectar ao iniciar o servidor
+            </label>
+            </div>
+            <button class="btn-primary btn-sm" id="btn-save-config" style="align-self:flex-start; margin-top:4px;">Salvar</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    'use strict';
+
+let bots = [];
+let selectedId = null;
+let pollTimer = null;
+
+// ── API ──────────────────────────────────────────────────────────────────────
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return res.json();
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+
+function statusDot(status) {
+  if (status === 'online')      return '<span class="bot-dot online"></span>';
+  if (status === 'connecting')  return '<span class="bot-dot connecting"></span>';
+  if (status === 'error')       return '<span class="bot-dot error"></span>';
+  return '<span class="bot-dot"></span>';
+}
+
+function badgeHtml(status) {
+  return `<span class="bot-status-badge badge-${status}">${status}</span>`;
+}
+
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function formatTime(ms) {
+  const d = new Date(ms);
+  return d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+
+function renderBotList() {
+  const list = document.getElementById('bot-list');
+  if (!bots.length) {
+    list.innerHTML = '<div class="empty-list">Nenhum bot criado ainda.</div>';
+    return;
+  }
+  list.innerHTML = bots.map((b) => `
+    <div class="bot-card ${b.id === selectedId ? 'active' : ''}" data-id="${b.id}">
+      ${statusDot(b.status)}
+      <div class="bot-info">
+        <strong>${escHtml(b.label || b.host)}</strong>
+        <small>${escHtml(b.nick)} · ${escHtml(b.host)}:${b.port}</small>
+      </div>
+      ${badgeHtml(b.status)}
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.bot-card').forEach((card) => {
+    card.addEventListener('click', () => selectBot(card.dataset.id));
+  });
+}
+
+function renderDetail() {
+  const bot = bots.find((b) => b.id === selectedId);
+  const empty = document.getElementById('detail-empty');
+  const content = document.getElementById('detail-content');
+
+  if (!bot) {
+    empty.style.display = 'flex';
+    content.style.display = 'none';
+    return;
+  }
+
+  empty.style.display = 'none';
+  content.style.display = 'flex';
+
+  document.getElementById('detail-title').textContent = bot.label || bot.host;
+  document.getElementById('detail-subtitle').textContent =
+    `${bot.nick} · ${bot.host}:${bot.port}${bot.version ? ` · v${bot.version}` : ''}`;
+
+  // Botões
+  const btnConn = document.getElementById('btn-connect');
+  const btnDisc = document.getElementById('btn-disconnect');
+  btnConn.disabled = bot.status === 'online' || bot.status === 'connecting';
+  btnDisc.disabled = bot.status === 'offline';
+
+  // Chat log
+  const chatBox = document.getElementById('chat-box');
+  const wasBottom = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight < 40;
+  chatBox.innerHTML = (bot.chatLog || []).map((entry) => {
+    const cls = entry.direction === 'out' ? 'chat-out' : entry.direction === 'in' ? 'chat-in' : 'chat-sys';
+    return `<span class="log-line ${cls}"><span class="log-time">${formatTime(entry.t)}</span>${escHtml(entry.text)}</span>`;
+  }).join('') || '<span class="chat-sys log-line">Sem mensagens ainda.</span>';
+  if (wasBottom) chatBox.scrollTop = chatBox.scrollHeight;
+
+  // Log
+  const logBox = document.getElementById('log-box');
+  const logBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
+  logBox.innerHTML = (bot.log || []).map((entry) =>
+    `<span class="log-line"><span class="log-time">${formatTime(entry.t)}</span>${escHtml(entry.msg)}</span>`
+  ).join('') || '<span class="log-line">Nenhum log ainda.</span>';
+  if (logBottom) logBox.scrollTop = logBox.scrollHeight;
+
+  // Config
+  document.getElementById('cfg-label').value   = bot.label || '';
+  document.getElementById('cfg-nick').value    = bot.nick || '';
+  document.getElementById('cfg-host').value    = bot.host || '';
+  document.getElementById('cfg-port').value    = bot.port || 25565;
+  document.getElementById('cfg-version').value = bot.version || '';
+  document.getElementById('cfg-autoconnect').checked = Boolean(bot.autoConnect);
+}
+
+function render() {
+  renderBotList();
+  renderDetail();
+  const online = bots.filter((b) => b.status === 'online').length;
+  document.getElementById('header-status').textContent =
+    `${bots.length} bot${bots.length !== 1 ? 's' : ''} · ${online} online`;
+}
+
+// ── Polling ──────────────────────────────────────────────────────────────────
+
+async function poll() {
+  try {
+    const data = await api('GET', '/api/bots');
+    if (data.ok) {
+      bots = data.bots;
+      render();
+    }
+  } catch (_) {}
+}
+
+function startPoll() {
+  poll();
+  pollTimer = setInterval(poll, 2000);
+}
+
+// ── Ações ────────────────────────────────────────────────────────────────────
+
+function selectBot(id) {
+  selectedId = id;
+  render();
+  // Scroll chat to bottom when switching
+  setTimeout(() => {
+    const cb = document.getElementById('chat-box');
+    if (cb) cb.scrollTop = cb.scrollHeight;
+  }, 50);
+}
+
+// Tabs
+document.querySelectorAll('.tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+  });
+});
+
+// New bot toggle
+document.getElementById('new-bot-toggle').addEventListener('click', () => {
+  const btn  = document.getElementById('new-bot-toggle');
+  const body = document.getElementById('new-bot-body');
+  btn.classList.toggle('open');
+  body.classList.toggle('open');
+});
+
+// Criar bot
+document.getElementById('btn-create').addEventListener('click', async () => {
+  const host    = document.getElementById('new-host').value.trim();
+  const port    = Number(document.getElementById('new-port').value) || 25565;
+  const nick    = document.getElementById('new-nick').value.trim() || 'RochaBot';
+  const version = document.getElementById('new-version').value.trim() || '';
+  const label   = document.getElementById('new-label').value.trim() || host;
+  const autoConnect = document.getElementById('new-autoconnect').checked;
+
+  if (!host) { alert('Informe o host.'); return; }
+
+  const data = await api('POST', '/api/bots', { host, port, nick, version, label, autoConnect });
+  if (data.ok) {
+    document.getElementById('new-host').value    = '';
+    document.getElementById('new-nick').value    = '';
+    document.getElementById('new-version').value = '';
+    document.getElementById('new-label').value   = '';
+    document.getElementById('new-autoconnect').checked = false;
+    // Fechar form
+    document.getElementById('new-bot-toggle').classList.remove('open');
+    document.getElementById('new-bot-body').classList.remove('open');
+    await poll();
+    selectBot(data.id);
+  } else {
+    alert('Erro: ' + (data.error || 'desconhecido'));
+  }
+});
+
+// Conectar
+document.getElementById('btn-connect').addEventListener('click', async () => {
+  if (!selectedId) return;
+  await api('POST', `/api/bots/${selectedId}/connect`);
+  poll();
+});
+
+// Desconectar
+document.getElementById('btn-disconnect').addEventListener('click', async () => {
+  if (!selectedId) return;
+  await api('POST', `/api/bots/${selectedId}/disconnect`);
+  poll();
+});
+
+// Remover
+document.getElementById('btn-delete').addEventListener('click', async () => {
+  if (!selectedId) return;
+  const bot = bots.find((b) => b.id === selectedId);
+  if (!confirm(`Remover o bot "${bot?.label || bot?.host}"?`)) return;
+  await api('DELETE', `/api/bots/${selectedId}`);
+  selectedId = null;
+  poll();
+});
+
+// Enviar chat
+async function sendChatMsg() {
+  const input = document.getElementById('chat-input');
+  const msg   = input.value.trim();
+  if (!msg || !selectedId) return;
+  input.value = '';
+  const data = await api('POST', `/api/bots/${selectedId}/chat`, { message: msg });
+  if (!data.ok) alert('Não foi possível enviar: ' + (data.error || 'bot offline'));
+  poll();
+}
+document.getElementById('btn-send').addEventListener('click', sendChatMsg);
+document.getElementById('chat-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendChatMsg();
+});
+
+// Limpar log (só visual)
+document.getElementById('btn-clear-log').addEventListener('click', () => {
+  document.getElementById('log-box').innerHTML = '';
+});
+
+// Salvar config
+document.getElementById('btn-save-config').addEventListener('click', async () => {
+  if (!selectedId) return;
+  const patch = {
+    label:       document.getElementById('cfg-label').value.trim(),
+    nick:        document.getElementById('cfg-nick').value.trim(),
+    host:        document.getElementById('cfg-host').value.trim(),
+    port:        Number(document.getElementById('cfg-port').value) || 25565,
+    version:     document.getElementById('cfg-version').value.trim(),
+    autoConnect: document.getElementById('cfg-autoconnect').checked,
+  };
+  const data = await api('PATCH', `/api/bots/${selectedId}`, patch);
+  if (data.ok) poll();
+  else alert('Erro ao salvar: ' + (data.error || 'desconhecido'));
+});
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+startPoll();
+  </script>
+</body>
+
+</html>
