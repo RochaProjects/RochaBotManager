@@ -21,3 +21,4 @@ coverage/
 .webslop/
 .mcp.json
 AGENTS.md
+.bonto/
