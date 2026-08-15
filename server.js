@@ -95,6 +95,15 @@ async function connectBot(id) {
   rt.status = 'connecting';
   pushLog(id, `Conectando em ${cfg.host}:${cfg.port} como ${cfg.nick}...`);
 
+  // Avisa se outro bot online já usa o mesmo nick no mesmo servidor
+  const conflict = botConfigs.find((b) =>
+    b.id !== id && b.host === cfg.host && b.port === cfg.port &&
+    b.nick === cfg.nick && getRuntime(b.id).status === 'online'
+  );
+  if (conflict) {
+    pushLog(id, `AVISO: bot "${conflict.label || conflict.id}" já está online com o nick "${cfg.nick}" no mesmo servidor. O servidor pode kickar um dos dois.`);
+  }
+
   // Versão: usa a configurada, ou auto-detecta via ping
   let version = cfg.version || '';
   if (!version) {
@@ -128,6 +137,12 @@ async function connectBot(id) {
 
   rt.client = bot;
 
+  // Flag para saber se a desconexão foi intencional (pelo painel)
+  let intentionalDisconnect = false;
+
+  // Guarda referência para poder checar depois
+  rt._setIntentional = () => { intentionalDisconnect = true; };
+
   bot.on('login', () => {
     rt.status = 'online';
     pushLog(id, `Online no servidor. (v${version})`);
@@ -144,22 +159,57 @@ async function connectBot(id) {
   });
 
   bot.on('kicked', (reason) => {
+    if (intentionalDisconnect) return;
     let msg = reason;
-    try { msg = JSON.parse(reason)?.text || JSON.parse(reason)?.translate || reason; } catch (_) {}
+    try {
+      const parsed = JSON.parse(reason);
+      msg = parsed?.text || parsed?.translate || reason;
+    } catch (_) {}
+
+    // Velocity/BungeeCord manda kick com mensagem de transfer — não é erro real
+    const lower = String(msg).toLowerCase();
+    const isTransfer = lower.includes('transfer') || lower.includes('moving') ||
+                       lower.includes('connecting') || lower.includes('please wait');
+    if (isTransfer) {
+      pushLog(id, `Transfer de servidor detectado, mantendo online...`);
+      // Não muda status — o bot vai reconectar via evento 'end' com reconexão
+      return;
+    }
+
     rt.status = 'offline';
     rt.client = null;
     pushLog(id, `Kickado: ${msg}`);
   });
 
   bot.on('error', (err) => {
-    // Ignorar erros após desconexão intencional
-    if (rt.status === 'offline') return;
+    if (intentionalDisconnect || rt.status === 'offline') return;
     rt.status = 'error';
     rt.client = null;
     pushLog(id, `Erro: ${err.message}`);
   });
 
   bot.on('end', (reason) => {
+    if (intentionalDisconnect) return;
+
+    const lower = String(reason || '').toLowerCase();
+
+    // Velocity transfer: reconecta automaticamente após breve delay
+    const isTransfer = lower.includes('transfer') || lower.includes('SwitchProxyCommand') ||
+                       lower === '' || lower === 'socketclosed' || lower === 'end';
+
+    if (isTransfer && rt.status !== 'offline') {
+      pushLog(id, `Troca de servidor (${reason || 'transfer'}), reconectando em 1.5s...`);
+      rt.client = null;
+      rt.status = 'connecting';
+      setTimeout(() => {
+        // Só reconecta se ainda não foi desconectado manualmente
+        if (!intentionalDisconnect && runtime[id]?.status === 'connecting') {
+          connectBot(id);
+        }
+      }, 1500);
+      return;
+    }
+
     if (rt.status !== 'offline') {
       rt.status = 'offline';
       rt.client = null;
@@ -170,11 +220,14 @@ async function connectBot(id) {
 
 function disconnectBot(id) {
   const rt = getRuntime(id);
+  // Sinaliza desconexão intencional antes do quit para ignorar eventos end/error
+  if (rt._setIntentional) rt._setIntentional();
   if (rt.client) {
     try { rt.client.quit('Desconectado pelo painel'); } catch (_) {}
     rt.client = null;
   }
   rt.status = 'offline';
+  rt._setIntentional = null;
   pushLog(id, 'Desconectado pelo painel.');
 }
 
@@ -238,11 +291,26 @@ async function handleApi(req, res, pathname) {
     const body = await readBody(req);
     const host = String(body.host || '').trim();
     if (!host) return json(res, 400, { ok: false, error: 'host obrigatorio' });
+    const nick = String(body.nick || DEFAULT_NICK).trim().slice(0, 16) || DEFAULT_NICK;
+
+    // Avisa se já existe bot online com mesmo nick no mesmo servidor
+    const conflict = botConfigs.find((b) =>
+      b.host === host && b.port === (Number(body.port) || 25565) &&
+      b.nick === nick && getRuntime(b.id).status === 'online'
+    );
+    if (conflict) {
+      return json(res, 409, {
+        ok: false,
+        error: 'nick_conflict',
+        message: `Já existe um bot online com o nick "${nick}" em ${host}. Use um nick diferente.`,
+      });
+    }
+
     const id = newId();
     const cfg = {
       id,
       label: String(body.label || host).trim(),
-      nick: String(body.nick || DEFAULT_NICK).trim().slice(0, 16) || DEFAULT_NICK,
+      nick,
       host,
       port: Number(body.port) || 25565,
       version: String(body.version || '').trim(),
