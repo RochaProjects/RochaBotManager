@@ -209,19 +209,39 @@ async function connectBot(id) {
 
   bot.on('kicked', (reason) => {
     if (intentionalDisconnect) return;
+
+    // reason pode ser string JSON, string plana, ou já um objeto
     let msg = reason;
+    let rawReason = reason;
     try {
-      const parsed = JSON.parse(reason);
-      msg = parsed?.text || parsed?.translate || reason;
+      if (typeof reason === 'string') {
+        const parsed = JSON.parse(reason);
+        msg = parsed?.text || parsed?.translate || parsed?.extra?.[0]?.text || reason;
+        rawReason = parsed;
+      } else if (typeof reason === 'object' && reason !== null) {
+        msg = reason.text || reason.translate || reason.extra?.[0]?.text || JSON.stringify(reason);
+        rawReason = reason;
+      }
     } catch (_) {}
+
+    // Loga o reason bruto para facilitar debug
+    pushLog(id, `[kicked raw] ${JSON.stringify(rawReason)}`);
 
     // Velocity/BungeeCord manda kick com mensagem de transfer — não é erro real
     const lower = String(msg).toLowerCase();
-    const isTransfer = lower.includes('transfer') || lower.includes('moving') ||
-                       lower.includes('connecting') || lower.includes('please wait');
+    const rawStr = JSON.stringify(rawReason).toLowerCase();
+    const isTransfer =
+      lower.includes('transfer') || lower.includes('moving') ||
+      lower.includes('connecting') || lower.includes('please wait') ||
+      rawStr.includes('transfer') || rawStr.includes('switchserver') ||
+      rawStr.includes('connect_to');
     if (isTransfer) {
-      pushLog(id, `Transfer de servidor detectado, mantendo online...`);
-      // Não muda status — o bot vai reconectar via evento 'end' com reconexão
+      pushLog(id, `Transfer de servidor detectado, reconectando...`);
+      rt.client = null;
+      rt.status = 'connecting';
+      setTimeout(() => {
+        if (!intentionalDisconnect && runtime[id]?.status === 'connecting') connectBot(id);
+      }, 1500);
       return;
     }
 
