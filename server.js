@@ -4,6 +4,33 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
+// ── Patch Transfer Packet ─────────────────────────────────────────────────────
+// DEVE vir antes do require(mineflayer) para garantir que o cache do Node.js
+// já tem o tipo definido quando o mineflayer/minecraft-protocol inicializa.
+// O Velocity envia o Transfer Packet (MC 1.20.5+) para mover players entre
+// servidores backend. O minecraft-data mapeia o ID do pacote mas não define o
+// tipo "packet_common_transfer", causando erro de decode e disconnect com
+// "An internal error occurred in your connection."
+try {
+  const mcData = require(path.join(__dirname, 'node_modules', 'minecraft-data'));
+  for (const ver of ['1.21', '1.21.1', '1.21.4']) {
+    try {
+      const d = mcData(ver);
+      const types = d?.protocol?.play?.toClient?.types;
+      if (types && !types.packet_common_transfer) {
+        types.packet_common_transfer = [
+          'container',
+          [
+            { name: 'host', type: 'string' },
+            { name: 'port', type: 'varint' },
+          ],
+        ];
+      }
+    } catch (_) {}
+  }
+} catch (_) {}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Resolve dependências a partir deste arquivo, independente do cwd
 const mineflayer = require(path.join(__dirname, 'node_modules', 'mineflayer'));
 const mc = require(path.join(__dirname, 'node_modules', 'minecraft-protocol'));
@@ -118,25 +145,6 @@ async function connectBot(id) {
     }
   }
 
-  // Patcha o minecraft-data para definir packet_common_transfer antes de criar o bot.
-  // O transfer packet (Velocity/MC 1.20.5+) já aparece no mapeamento de IDs do
-  // minecraft-data, mas sem definição de tipo — isso faz o protocolo lançar
-  // "A packet did not decode successfully" ao receber o pacote.
-  // Estrutura: host (string) + port (varint)
-  try {
-    const mcData = require(path.join(__dirname, 'node_modules', 'minecraft-data'))(version);
-    const toClientTypes = mcData.protocol?.play?.toClient?.types;
-    if (toClientTypes && !toClientTypes.packet_common_transfer) {
-      toClientTypes.packet_common_transfer = [
-        'container',
-        [
-          { name: 'host', type: 'string' },
-          { name: 'port', type: 'varint' },
-        ],
-      ];
-    }
-  } catch (_) {}
-
   let bot;
   try {
     bot = mineflayer.createBot({
@@ -210,25 +218,30 @@ async function connectBot(id) {
   bot.on('kicked', (reason) => {
     if (intentionalDisconnect) return;
 
-    // reason pode ser string JSON, string plana, ou já um objeto
-    let msg = reason;
+    // reason pode ser string JSON, string plana, objeto JSON ou NBT compound
+    let msg = '';
     let rawReason = reason;
     try {
       if (typeof reason === 'string') {
         const parsed = JSON.parse(reason);
-        msg = parsed?.text || parsed?.translate || parsed?.extra?.[0]?.text || reason;
         rawReason = parsed;
+        msg = parsed?.text || parsed?.translate || parsed?.extra?.[0]?.text || reason;
       } else if (typeof reason === 'object' && reason !== null) {
-        msg = reason.text || reason.translate || reason.extra?.[0]?.text || JSON.stringify(reason);
         rawReason = reason;
+        // NBT compound: { type: 'compound', value: { text: { type: 'string', value: '...' } } }
+        if (reason.type === 'compound' && reason.value) {
+          msg = reason.value?.text?.value || reason.value?.translate?.value || JSON.stringify(reason);
+        } else {
+          msg = reason.text || reason.translate || reason.extra?.[0]?.text || JSON.stringify(reason);
+        }
       }
-    } catch (_) {}
+    } catch (_) {
+      msg = String(reason);
+    }
 
-    // Loga o reason bruto para facilitar debug
     pushLog(id, `[kicked raw] ${JSON.stringify(rawReason)}`);
 
-    // Velocity/BungeeCord manda kick com mensagem de transfer — não é erro real
-    const lower = String(msg).toLowerCase();
+    const lower = msg.toLowerCase();
     const rawStr = JSON.stringify(rawReason).toLowerCase();
     const isTransfer =
       lower.includes('transfer') || lower.includes('moving') ||
