@@ -589,7 +589,7 @@
     <section class="detail" id="detail">
       <div class="detail-empty" id="detail-empty">Selecione um bot para gerenciar.</div>
 
-      <div id="detail-content" style="display:none; flex:1; display:none; flex-direction:column; overflow:hidden;">
+      <div id="detail-content" style="display:none; flex:1; flex-direction:column; overflow:hidden;">
         <div class="detail-header">
           <div class="detail-header-left">
             <h2 id="detail-title">—</h2>
@@ -665,6 +665,8 @@
 let bots = [];
 let selectedId = null;
 let pollTimer = null;
+let activeTab = 'chat';
+let configDirty = false; // true quando usuário está editando config — pausa reescrita dos campos
 
 // ── API ──────────────────────────────────────────────────────────────────────
 
@@ -762,13 +764,15 @@ function renderDetail() {
   ).join('') || '<span class="log-line">Nenhum log ainda.</span>';
   if (logBottom) logBox.scrollTop = logBox.scrollHeight;
 
-  // Config
-  document.getElementById('cfg-label').value   = bot.label || '';
-  document.getElementById('cfg-nick').value    = bot.nick || '';
-  document.getElementById('cfg-host').value    = bot.host || '';
-  document.getElementById('cfg-port').value    = bot.port || 25565;
-  document.getElementById('cfg-version').value = bot.version || '';
-  document.getElementById('cfg-autoconnect').checked = Boolean(bot.autoConnect);
+  // Config — só preenche se usuário não está editando
+  if (!configDirty) {
+    document.getElementById('cfg-label').value    = bot.label || '';
+    document.getElementById('cfg-nick').value     = bot.nick || '';
+    document.getElementById('cfg-host').value     = bot.host || '';
+    document.getElementById('cfg-port').value     = bot.port || 25565;
+    document.getElementById('cfg-version').value  = bot.version || '';
+    document.getElementById('cfg-autoconnect').checked = Boolean(bot.autoConnect);
+  }
 }
 
 function render() {
@@ -800,6 +804,7 @@ function startPoll() {
 
 function selectBot(id) {
   selectedId = id;
+  configDirty = false; // resetar ao trocar de bot
   render();
   // Scroll chat to bottom when switching
   setTimeout(() => {
@@ -807,6 +812,14 @@ function selectBot(id) {
     if (cb) cb.scrollTop = cb.scrollHeight;
   }, 50);
 }
+
+// Marcar configDirty quando usuário foca num campo de config
+['cfg-label','cfg-nick','cfg-host','cfg-port','cfg-version','cfg-autoconnect'].forEach((id) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('focus', () => { configDirty = true; });
+  el.addEventListener('change', () => { configDirty = true; });
+});
 
 // Tabs
 document.querySelectorAll('.tab-btn').forEach((btn) => {
@@ -910,8 +923,12 @@ document.getElementById('btn-save-config').addEventListener('click', async () =>
     autoConnect: document.getElementById('cfg-autoconnect').checked,
   };
   const data = await api('PATCH', `/api/bots/${selectedId}`, patch);
-  if (data.ok) poll();
-  else alert('Erro ao salvar: ' + (data.error || 'desconhecido'));
+  if (data.ok) {
+    configDirty = false;
+    poll();
+  } else {
+    alert('Erro ao salvar: ' + (data.error || 'desconhecido'));
+  }
 });
 
 // ── Init ─────────────────────────────────────────────────────────────────────
